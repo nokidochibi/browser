@@ -1,1 +1,405 @@
+import React, { useState, useEffect } from 'react';
+import { ChevronLeft, Tags, Bookmark, XSquare, Plus, Search, X, Check, ExternalLink } from 'lucide-react';
 
+// === 設定 ===
+// 後でGASをデプロイしたら、そのWebアプリのURLをここに貼り付けます
+const GAS_URL = ""; 
+
+// === 初期モックデータ（プレビュー用） ===
+const initialTags = ["音楽", "ゲーム", "勉強", "料理", "後で見る"];
+const initialBookmarks = [
+  { url: "https://www.youtube.com/watch?v=jNQXAC9IVRw", tags: ["動物", "後で見る"], title: "Me at the zoo" },
+  { url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", tags: ["音楽"], title: "Rick Astley" },
+];
+
+export default function App() {
+  const [tabs, setTabs] = useState([{ id: Date.now(), url: '', title: '新しいタブ' }]);
+  const [activeTabId, setActiveTabId] = useState(tabs[0].id);
+  
+  // データ状態
+  const [tags, setTags] = useState(initialTags);
+  const [bookmarks, setBookmarks] = useState(initialBookmarks);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // モーダル状態
+  const [isTagModalOpen, setTagModalOpen] = useState(false);
+  const [isBookmarkModalOpen, setBookmarkModalOpen] = useState(false);
+
+  // データ取得（GAS連携）
+  useEffect(() => {
+    if (!GAS_URL) return; // GAS_URLが未設定の場合はモックデータで動作
+    
+    setIsLoading(true);
+    fetch(GAS_URL)
+      .then(res => res.json())
+      .then(data => {
+        if (data.tags) setTags(data.tags);
+        if (data.bookmarks) setBookmarks(data.bookmarks);
+      })
+      .catch(err => console.error("データ取得エラー:", err))
+      .finally(() => setIsLoading(false));
+  }, []);
+
+  // --- ユーティリティ ---
+  // YouTubeのURLをiframe埋め込み用に変換
+  const getIframeUrl = (url) => {
+    if (!url) return '';
+    if (url.includes('youtube.com/watch') || url.includes('youtu.be/')) {
+      const videoId = url.split('v=')[1]?.split('&')[0] || url.split('youtu.be/')[1]?.split('?')[0];
+      return `https://www.youtube.com/embed/${videoId}`;
+    }
+    return url;
+  };
+
+  // サムネイル画像の取得（YouTubeメイン）
+  const getThumbnail = (url) => {
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+      const videoId = url.split('v=')[1]?.split('&')[0] || url.split('youtu.be/')[1]?.split('?')[0];
+      return `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
+    }
+    return "https://placehold.co/320x180/e2e8f0/475569?text=No+Thumbnail";
+  };
+
+  // --- タブ操作 ---
+  const handleNewTab = () => {
+    const newTab = { id: Date.now(), url: '', title: '新しいタブ' };
+    setTabs([...tabs, newTab]);
+    setActiveTabId(newTab.id);
+  };
+
+  const handleCloseAllTabs = () => {
+    if (window.confirm('すべてのタブを閉じますか？')) {
+      const newTab = { id: Date.now(), url: '', title: '新しいタブ' };
+      setTabs([newTab]);
+      setActiveTabId(newTab.id);
+    }
+  };
+
+  const handleBack = () => {
+    // 簡易的な戻る（左のタブに移動する）
+    const currentIndex = tabs.findIndex(t => t.id === activeTabId);
+    if (currentIndex > 0) {
+      setActiveTabId(tabs[currentIndex - 1].id);
+    }
+  };
+
+  const closeTab = (id, e) => {
+    e.stopPropagation();
+    if (tabs.length === 1) {
+      setTabs([{ id: Date.now(), url: '', title: '新しいタブ' }]);
+      return;
+    }
+    const newTabs = tabs.filter(t => t.id !== id);
+    setTabs(newTabs);
+    if (activeTabId === id) {
+      setActiveTabId(newTabs[newTabs.length - 1].id);
+    }
+  };
+
+  const openUrlInTab = (url, title = 'Webページ') => {
+    const newTabs = tabs.map(tab => {
+      if (tab.id === activeTabId) {
+        return { ...tab, url, title };
+      }
+      return tab;
+    });
+    setTabs(newTabs);
+    setBookmarkModalOpen(false);
+  };
+
+  // --- タグ・ブックマーク保存（GASへ送信） ---
+  const saveBookmark = async (url, selectedTags) => {
+    if (!url) return alert("URLがありません");
+    
+    // ローカル状態を先に更新（楽観的UI）
+    const existingIndex = bookmarks.findIndex(b => b.url === url);
+    let newBookmarks = [...bookmarks];
+    if (existingIndex >= 0) {
+      newBookmarks[existingIndex].tags = selectedTags;
+    } else {
+      newBookmarks.push({ url, tags: selectedTags, title: "新しいブックマーク" });
+    }
+    setBookmarks(newBookmarks);
+    
+    // GAS連携が設定されていれば送信
+    if (GAS_URL) {
+      try {
+        await fetch(GAS_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: JSON.stringify({ url, tags: selectedTags })
+        });
+      } catch (e) {
+        console.error("保存エラー:", e);
+        alert("保存に失敗しました");
+      }
+    }
+    setTagModalOpen(false);
+  };
+
+  const activeTab = tabs.find(t => t.id === activeTabId);
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-100 font-sans text-slate-800">
+      
+      {/* 上部タブバー */}
+      <div className="flex bg-slate-200 overflow-x-auto whitespace-nowrap scrollbar-hide border-b border-slate-300">
+        {tabs.map(tab => (
+          <div 
+            key={tab.id}
+            onClick={() => setActiveTabId(tab.id)}
+            className={`flex items-center px-4 py-3 min-w-[120px] max-w-[200px] border-r border-slate-300 cursor-pointer ${activeTabId === tab.id ? 'bg-white font-bold' : 'hover:bg-slate-100 text-slate-600'}`}
+          >
+            <span className="truncate flex-1 text-sm">{tab.title}</span>
+            <button onClick={(e) => closeTab(tab.id, e)} className="ml-2 p-1 rounded-full hover:bg-slate-200">
+              <X size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* メインコンテンツエリア */}
+      <div className="flex-1 overflow-hidden bg-white relative">
+        {tabs.map(tab => (
+          <div key={tab.id} className={`absolute inset-0 w-full h-full ${activeTabId === tab.id ? 'block' : 'hidden'}`}>
+            {tab.url ? (
+              <iframe 
+                src={getIframeUrl(tab.url)} 
+                className="w-full h-full border-none"
+                allowFullScreen
+                sandbox="allow-scripts allow-same-origin allow-presentation"
+                title="Browser Content"
+              />
+            ) : (
+              <SearchScreen onSearch={openUrlInTab} />
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* 下部ナビゲーション（iPad/iPhone向けに大きく） */}
+      <div className="h-16 bg-white border-t border-slate-200 flex justify-around items-center px-2 pb-safe">
+        <NavButton icon={<ChevronLeft size={28} />} label="戻る" onClick={handleBack} disabled={tabs.findIndex(t => t.id === activeTabId) === 0} />
+        <NavButton icon={<Tags size={24} />} label="タグ登録" onClick={() => setTagModalOpen(true)} disabled={!activeTab?.url} />
+        <NavButton icon={<Bookmark size={24} />} label="ブックマーク" onClick={() => setBookmarkModalOpen(true)} />
+        <NavButton icon={<XSquare size={24} />} label="すべて閉じる" onClick={handleCloseAllTabs} />
+        <NavButton icon={<Plus size={28} />} label="新規タブ" onClick={handleNewTab} primary />
+      </div>
+
+      {/* モーダル群 */}
+      {isTagModalOpen && (
+        <TagRegisterModal 
+          currentUrl={activeTab?.url} 
+          allTags={tags} 
+          existingBookmarks={bookmarks}
+          onClose={() => setTagModalOpen(false)}
+          onSave={saveBookmark}
+        />
+      )}
+
+      {isBookmarkModalOpen && (
+        <BookmarkModal 
+          bookmarks={bookmarks} 
+          allTags={tags} 
+          onClose={() => setBookmarkModalOpen(false)}
+          onOpenUrl={openUrlInTab}
+          getThumbnail={getThumbnail}
+        />
+      )}
+    </div>
+  );
+}
+
+// === コンポーネント群 ===
+
+function SearchScreen({ onSearch }) {
+  const [input, setInput] = useState('');
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (input.startsWith('http')) {
+      onSearch(input, 'Webページ');
+    } else {
+      // iframeでGoogle検索は弾かれるため、別タブ（Safari本体）で開くことを促すUIにするか、URL入力を求める
+      alert("検索キーワードではなく、URL（https://...）を入力してください。または下のGoogleボタンをお使いください。");
+    }
+  };
+
+  const openGoogleSafari = () => {
+    window.open('https://www.google.com/', '_blank');
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center h-full p-6 bg-slate-50">
+      <h2 className="text-2xl font-bold mb-8 text-slate-700">何を開きますか？</h2>
+      
+      <form onSubmit={handleSubmit} className="w-full max-w-md mb-6">
+        <div className="flex items-center bg-white rounded-full shadow-md p-2 border border-slate-200">
+          <Search className="text-slate-400 ml-2" size={20} />
+          <input 
+            type="url" 
+            placeholder="URLを入力 (例: https://youtube.com/...)" 
+            className="flex-1 bg-transparent border-none outline-none px-3 py-2 text-lg"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+          />
+          <button type="submit" className="bg-blue-500 text-white px-4 py-2 rounded-full font-bold">
+            開く
+          </button>
+        </div>
+      </form>
+
+      <button onClick={openGoogleSafari} className="flex items-center gap-2 text-blue-600 hover:bg-blue-50 px-6 py-3 rounded-xl border border-blue-200 transition">
+        <ExternalLink size={20} />
+        Google検索を開く (別ウィンドウ)
+      </button>
+      <p className="text-sm text-slate-400 mt-4 text-center">
+        ※動画サイトなど一部のページは直接URLを入力してください。
+      </p>
+    </div>
+  );
+}
+
+function NavButton({ icon, label, onClick, disabled, primary }) {
+  return (
+    <button 
+      onClick={onClick} 
+      disabled={disabled}
+      className={`flex flex-col items-center justify-center w-16 h-14 rounded-xl transition ${disabled ? 'opacity-30' : 'active:scale-95'} ${primary ? 'text-blue-600' : 'text-slate-600'}`}
+    >
+      {icon}
+      <span className="text-[10px] mt-1 font-medium">{label}</span>
+    </button>
+  );
+}
+
+function TagRegisterModal({ currentUrl, allTags, existingBookmarks, onClose, onSave }) {
+  // 現在のURLに既に付いているタグを探す
+  const existingBm = existingBookmarks.find(b => b.url === currentUrl);
+  const initialSelected = existingBm ? existingBm.tags : [];
+  
+  const [selectedTags, setSelectedTags] = useState(initialSelected);
+  const [newTag, setNewTag] = useState('');
+
+  const toggleTag = (tag) => {
+    if (selectedTags.includes(tag)) {
+      setSelectedTags(selectedTags.filter(t => t !== tag));
+    } else {
+      setSelectedTags([...selectedTags, tag]);
+    }
+  };
+
+  const handleSave = () => {
+    let finalTags = [...selectedTags];
+    if (newTag.trim() && !finalTags.includes(newTag.trim())) {
+      finalTags.push(newTag.trim());
+    }
+    onSave(currentUrl, finalTags);
+  };
+
+  return (
+    <div className="absolute inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center">
+      <div className="bg-white w-full sm:w-[500px] h-[80vh] sm:h-auto sm:max-h-[80vh] rounded-t-2xl sm:rounded-2xl p-6 flex flex-col shadow-2xl animate-in slide-in-from-bottom-10">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-xl font-bold flex items-center gap-2"><Tags size={20}/> タグを登録</h3>
+          <button onClick={onClose} className="p-2 bg-slate-100 rounded-full"><X size={20}/></button>
+        </div>
+        
+        <p className="text-xs text-slate-500 mb-4 truncate bg-slate-100 p-2 rounded">{currentUrl}</p>
+
+        <div className="flex-1 overflow-y-auto mb-4">
+          <div className="flex flex-wrap gap-2">
+            {allTags.map(tag => (
+              <button 
+                key={tag}
+                onClick={() => toggleTag(tag)}
+                className={`px-4 py-2 rounded-full border-2 text-sm font-bold flex items-center gap-1 transition ${selectedTags.includes(tag) ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`}
+              >
+                {selectedTags.includes(tag) && <Check size={14} />}
+                {tag}
+              </button>
+            ))}
+          </div>
+          
+          <div className="mt-6 border-t pt-4">
+            <p className="text-sm font-bold mb-2 text-slate-600">新しいタグを作る</p>
+            <input 
+              type="text" 
+              placeholder="タグ名を入力..." 
+              value={newTag}
+              onChange={(e) => setNewTag(e.target.value)}
+              className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:border-blue-500"
+            />
+          </div>
+        </div>
+
+        <button 
+          onClick={handleSave}
+          className="w-full bg-blue-600 text-white font-bold text-lg py-4 rounded-xl shadow-lg active:scale-95 transition"
+        >
+          このタグで保存する
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BookmarkModal({ bookmarks, allTags, onClose, onOpenUrl, getThumbnail }) {
+  const [selectedTag, setSelectedTag] = useState(allTags[0] || '');
+
+  // 選択したタグが含まれているブックマークを抽出
+  const filteredBookmarks = bookmarks.filter(b => b.tags && b.tags.includes(selectedTag));
+
+  return (
+    <div className="absolute inset-0 bg-black/50 z-50 flex flex-col justify-end">
+      <div className="bg-slate-50 w-full h-[85vh] rounded-t-3xl shadow-2xl flex flex-col animate-in slide-in-from-bottom-10">
+        
+        {/* ヘッダー＆タグリスト（横スクロール） */}
+        <div className="bg-white rounded-t-3xl border-b pt-4 pb-2 shadow-sm z-10">
+          <div className="flex justify-between items-center px-6 mb-4">
+            <h3 className="text-xl font-bold flex items-center gap-2"><Bookmark size={20}/> ブックマーク</h3>
+            <button onClick={onClose} className="p-2 bg-slate-100 rounded-full"><X size={20}/></button>
+          </div>
+          
+          <div className="flex overflow-x-auto px-6 pb-2 gap-2 scrollbar-hide">
+            {allTags.map(tag => (
+              <button 
+                key={tag}
+                onClick={() => setSelectedTag(tag)}
+                className={`whitespace-nowrap px-5 py-2 rounded-full font-bold text-sm transition ${selectedTag === tag ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* サムネイルグリッド */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+            {filteredBookmarks.length === 0 ? (
+              <div className="col-span-full text-center text-slate-400 py-10">このタグのブックマークはありません</div>
+            ) : (
+              filteredBookmarks.map((bm, idx) => (
+                <div 
+                  key={idx} 
+                  onClick={() => onOpenUrl(bm.url, bm.title || '動画')}
+                  className="bg-white rounded-xl overflow-hidden shadow-sm border border-slate-200 active:scale-95 transition cursor-pointer"
+                >
+                  <div className="aspect-video bg-slate-200 relative">
+                    <img src={getThumbnail(bm.url)} alt="thumbnail" className="w-full h-full object-cover" />
+                  </div>
+                  <div className="p-3">
+                    <p className="text-sm font-bold text-slate-800 line-clamp-2 leading-tight">
+                      {bm.title || bm.url}
+                    </p>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
